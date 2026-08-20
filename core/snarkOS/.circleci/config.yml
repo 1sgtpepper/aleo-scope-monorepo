@@ -447,6 +447,14 @@ jobs:
           workspace_member: cli
           cache_key: cli
 
+  utilities:
+    executor: rust-docker
+    resource_class: << pipeline.parameters.medium >>
+    steps:
+      - run_serial:
+          workspace_member: utilities
+          cache_key: utilities
+
   node:
     executor: rust-docker
     resource_class: << pipeline.parameters.twoxlarge >>
@@ -671,7 +679,7 @@ jobs:
       - run:
           name: Check snarkos-display crate
           no_output_timeout: 10m
-          command: cargo check --package=snarkos-node-metrics --all-features
+          command: cargo check --package=snarkos-display --all-features
 
       - clear_environment:
           cache_key: v4.2.0-rust-1.88.0-check-other-crates-cache
@@ -853,6 +861,7 @@ workflows:
       - snarkos
       - account
       - cli
+      - utilities
 
   windows-workflow:
     jobs:
