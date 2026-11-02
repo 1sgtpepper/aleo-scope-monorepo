@@ -9,8 +9,8 @@ Current in-scope assets represented here:
 
 ## Blockchain / DLT
 
-- snarkVM: `core/snarkVM` at upstream `staging` commit `73689f769411b438b5f331173b3a87f478630a1f`
-- snarkOS: `core/snarkOS` at upstream `staging` commit `6b991bce366004e6c343a51eaff720d19261b8b3`
+- snarkVM: `core/snarkVM` at upstream `staging` commit `3531c2cb825990a15cc3fd4929e034c6ed14d435`
+- snarkOS: `core/snarkOS` at upstream `staging` commit `395f79781fdc5c3fbe40f1331c87e8f03367645c`
 
 ## Notes
 
