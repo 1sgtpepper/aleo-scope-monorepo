@@ -92,8 +92,9 @@ features = [ "storage" ]
 [dev-dependencies.criterion]
 workspace = true
 
-[dev-dependencies.tracing-test]
+[dev-dependencies.tracing-subscriber]
 workspace = true
+features = [ "env-filter" ]
 
 [features]
 default = [ "derive" ]
