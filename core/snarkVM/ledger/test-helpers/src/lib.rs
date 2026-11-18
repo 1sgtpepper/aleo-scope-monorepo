@@ -47,6 +47,9 @@ use snarkvm_utilities::PrettyUnwrap;
 use anyhow::Context;
 use std::sync::OnceLock;
 
+mod genesis_fixture;
+pub use genesis_fixture::load_or_build_genesis_fixture;
+
 type CurrentNetwork = console::network::MainnetV0;
 type CurrentAleo = circuit::network::AleoV0;
 
@@ -62,8 +65,7 @@ pub fn sample_inputs() -> Vec<(<CurrentNetwork as Network>::TransitionID, Input<
     let rng = &mut TestRng::default();
 
     // Sample a transition.
-    let transaction = crate::sample_execution_transaction_with_fee(true, rng, 0);
-    let transition = transaction.transitions().next().unwrap();
+    let transition = crate::sample_transition(rng);
 
     // Retrieve the transition ID and input.
     let transition_id = *transition.id();
@@ -95,8 +97,7 @@ pub fn sample_outputs() -> Vec<(<CurrentNetwork as Network>::TransitionID, Outpu
     let rng = &mut TestRng::default();
 
     // Sample a transition.
-    let transaction = crate::sample_execution_transaction_with_fee(true, rng, 0);
-    let transition = transaction.transitions().next().unwrap();
+    let transition = crate::sample_transition(rng);
 
     // Retrieve the transition ID and input.
     let transition_id = *transition.id();
@@ -306,18 +307,13 @@ pub fn sample_rejected_deployment(
     version: u8,
     edition: u16,
     has_translation_keys: bool,
-    is_fee_private: bool,
     rng: &mut TestRng,
 ) -> Rejected<CurrentNetwork> {
-    // Sample a deploy transaction.
-    let deployment =
-        match crate::sample_deployment_transaction(version, edition, has_translation_keys, is_fee_private, rng) {
-            Transaction::Deploy(_, _, _, deployment, _) => (*deployment).clone(),
-            _ => unreachable!(),
-        };
+    // Sample a deployment and the private key that signs its program owner.
+    let (deployment, private_key) =
+        crate::sample_deployment_and_private_key(version, edition, has_translation_keys, rng);
 
-    // Sample a new program owner.
-    let private_key = PrivateKey::new(rng).unwrap();
+    // Construct the program owner.
     let deployment_id = deployment.to_deployment_id().unwrap();
     let program_owner = ProgramOwner::new(&private_key, deployment_id, rng).unwrap();
 
@@ -342,15 +338,12 @@ pub fn sample_execution(rng: &mut TestRng, index: usize) -> Execution<CurrentNet
 }
 
 /// Samples a rejected execution.
-pub fn sample_rejected_execution(is_fee_private: bool, rng: &mut TestRng) -> Rejected<CurrentNetwork> {
-    // Sample an execute transaction.
-    let execution = match crate::sample_execution_transaction_with_fee(is_fee_private, rng, 0) {
-        Transaction::Execute(_, _, execution, _) => execution,
-        _ => unreachable!(),
-    };
+pub fn sample_rejected_execution(rng: &mut TestRng) -> Rejected<CurrentNetwork> {
+    // Sample an execution.
+    let execution = crate::sample_execution(rng, 0);
 
     // Return the rejected execution.
-    Rejected::new_execution(*execution)
+    Rejected::new_execution(execution)
 }
 
 /********************************************** Fee ***********************************************/
@@ -502,14 +495,13 @@ function large_transaction:
 
 /****************************************** Transaction *******************************************/
 
-/// Samples a random deployment transaction with a private or public fee.
-pub fn sample_deployment_transaction(
+/// Samples a random deployment and the private key that signs its program owner.
+fn sample_deployment_and_private_key(
     version: u8,
     edition: u16,
     has_translation_keys: bool,
-    is_fee_private: bool,
     rng: &mut TestRng,
-) -> Transaction<CurrentNetwork> {
+) -> (Deployment<CurrentNetwork>, PrivateKey<CurrentNetwork>) {
     // Sample a private key.
     let private_key = PrivateKey::new(rng).unwrap();
     // Sample a deployment.
@@ -533,6 +525,21 @@ pub fn sample_deployment_transaction(
         }
         _ => panic!("Invalid deployment version ({version}) or translation keys combination."),
     };
+
+    (deployment, private_key)
+}
+
+/// Samples a random deployment transaction with a private or public fee.
+pub fn sample_deployment_transaction(
+    version: u8,
+    edition: u16,
+    has_translation_keys: bool,
+    is_fee_private: bool,
+    rng: &mut TestRng,
+) -> Transaction<CurrentNetwork> {
+    // Sample a deployment and the private key that signs its program owner.
+    let (deployment, private_key) =
+        crate::sample_deployment_and_private_key(version, edition, has_translation_keys, rng);
 
     // Compute the deployment ID.
     let deployment_id = deployment.to_deployment_id().unwrap();
@@ -670,30 +677,66 @@ pub fn sample_genesis_block_and_transactions(
     (block, transactions)
 }
 
-/// Samples a random genesis block, the transactions from the genesis block, and the genesis private key.
-/// If this function was called before, this returns a cached version.
+/// Returns the genesis block, the transactions of the genesis block, and the genesis private key.
+///
+/// Every call returns the same genesis block and genesis private key.
+/// They do not depend on `_rng`, and `_rng` is not advanced.
 pub fn sample_genesis_block_and_components(
-    rng: &mut TestRng,
+    _rng: &mut TestRng,
 ) -> (Block<CurrentNetwork>, Transactions<CurrentNetwork>, PrivateKey<CurrentNetwork>) {
-    static INSTANCE: OnceLock<(Block<CurrentNetwork>, Transactions<CurrentNetwork>, PrivateKey<CurrentNetwork>)> =
-        OnceLock::new();
-    INSTANCE.get_or_init(|| crate::sample_genesis_block_and_components_uncached(rng)).clone()
+    let (private_key, block) = genesis_fixture();
+    (block.clone(), block.transactions().clone(), *private_key)
 }
 
-pub fn sample_genesis_private_key(rng: &mut TestRng) -> PrivateKey<CurrentNetwork> {
-    static INSTANCE: OnceLock<PrivateKey<CurrentNetwork>> = OnceLock::new();
-    *INSTANCE.get_or_init(|| {
-        // Initialize a new caller.
-        PrivateKey::<CurrentNetwork>::new(rng).unwrap()
+/// Returns the genesis private key, which signs the block of `sample_genesis_block`.
+///
+/// The key does not depend on `_rng`, and `_rng` is not advanced.
+pub fn sample_genesis_private_key(_rng: &mut TestRng) -> PrivateKey<CurrentNetwork> {
+    genesis_fixture().0
+}
+
+/// The seed of the RNG that builds the genesis fixture.
+const GENESIS_FIXTURE_SEED: u64 = 1_779_135_982;
+
+/// Returns the genesis private key and the genesis block that it signs.
+///
+/// The test processes of one binary share the fixture through a file beside the binary.
+fn genesis_fixture() -> &'static (PrivateKey<CurrentNetwork>, Block<CurrentNetwork>) {
+    static INSTANCE: OnceLock<(PrivateKey<CurrentNetwork>, Block<CurrentNetwork>)> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        load_or_build_genesis_fixture("test-helpers-genesis", GENESIS_FIXTURE_SEED, build_genesis_fixture)
     })
 }
 
+/// Builds the genesis fixture from an RNG with the given seed.
+fn build_genesis_fixture(seed: u64) -> (PrivateKey<CurrentNetwork>, Block<CurrentNetwork>) {
+    let rng = &mut TestRng::from_seed(seed);
+    // Sample the genesis private key.
+    let private_key = PrivateKey::<CurrentNetwork>::new(rng).expect("Failed to sample the genesis private key");
+    // Construct the genesis block.
+    let (block, _) = build_genesis_block_and_transactions(&private_key, rng);
+    (private_key, block)
+}
+
 /// Samples a random genesis block, the transactions from the genesis block, and the genesis private key.
+///
+/// The genesis private key is the key of `sample_genesis_private_key`.
 pub fn sample_genesis_block_and_components_uncached(
     rng: &mut TestRng,
 ) -> (Block<CurrentNetwork>, Transactions<CurrentNetwork>, PrivateKey<CurrentNetwork>) {
     // Sample the genesis private key.
     let private_key = sample_genesis_private_key(rng);
+    // Construct the genesis block.
+    let (block, transactions) = build_genesis_block_and_transactions(&private_key, rng);
+    // Return the block, transaction, and private key.
+    (block, transactions, private_key)
+}
+
+/// Returns a new genesis block, which `private_key` signs, and the transactions of the block.
+fn build_genesis_block_and_transactions(
+    private_key: &PrivateKey<CurrentNetwork>,
+    rng: &mut TestRng,
+) -> (Block<CurrentNetwork>, Transactions<CurrentNetwork>) {
     let address = Address::<CurrentNetwork>::try_from(private_key).unwrap();
 
     // Prepare the locator.
@@ -710,7 +753,7 @@ pub fn sample_genesis_block_and_components_uncached(
         Transactions::from_iter((0..2).map(|_| {
             // Authorize the function.
             let authorization =
-                process.authorize::<CurrentAleo, _>(&private_key, locator.0, locator.1, inputs.iter(), rng).unwrap();
+                process.authorize::<CurrentAleo, _>(private_key, locator.0, locator.1, inputs.iter(), rng).unwrap();
             // Execute the function.
             let (_, mut trace) = process.execute::<CurrentAleo, _>(authorization, rng).unwrap();
 
@@ -744,7 +787,7 @@ pub fn sample_genesis_block_and_components_uncached(
 
     // Construct the block.
     let block = Block::new_beacon(
-        &private_key,
+        private_key,
         previous_hash,
         header,
         ratifications,
@@ -756,6 +799,22 @@ pub fn sample_genesis_block_and_components_uncached(
     )
     .unwrap();
     assert!(block.header().is_genesis().unwrap(), "Failed to initialize a genesis block");
-    // Return the block, transaction, and private key.
-    (block, transactions, private_key)
+    // Return the block and transactions.
+    (block, transactions)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_genesis_helpers_do_not_advance_rng() {
+        let rng = &mut TestRng::fixed(1);
+        let (block, transactions, private_key) = sample_genesis_block_and_components(rng);
+        assert_eq!(sample_genesis_private_key(rng), private_key);
+        assert_eq!(rng.random::<u64>(), TestRng::fixed(1).random::<u64>());
+        // The helpers return the genesis fixture.
+        assert_eq!((&private_key, &block), (&genesis_fixture().0, &genesis_fixture().1));
+        assert_eq!(&transactions, block.transactions());
+    }
 }

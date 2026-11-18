@@ -158,7 +158,9 @@ fn missing_block_in_tree_error(height: u32, block_tree_cache_path: Option<&std::
 }
 
 /// A trait for block storage.
-pub trait BlockStorage<N: Network>: 'static + Clone + Send + Sync {
+///
+/// This trait is sealed. Only snarkVM implements it.
+pub trait BlockStorage<N: Network>: crate::sealed::Sealed + 'static + Clone + Send + Sync {
     /// The mapping of `block height` to `state root`.
     type StateRootMap: for<'a> Map<'a, u32, N::StateRoot>;
     /// The mapping of `state root` to `block height`.
@@ -1905,7 +1907,7 @@ mod tests {
         let block_store = BlockStore::<CurrentNetwork, BlockMemory<_>>::open(StorageMode::new_test(None)).unwrap();
 
         let fee = snarkvm_ledger_test_helpers::sample_fee_public_transaction(rng);
-        let rejected = snarkvm_ledger_test_helpers::sample_rejected_execution(false, rng);
+        let rejected = snarkvm_ledger_test_helpers::sample_rejected_execution(rng);
         let transactions =
             Transactions::from_iter([
                 ConfirmedTransaction::rejected_execute(0, fee.clone(), rejected.clone(), vec![]).unwrap()
