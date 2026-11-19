@@ -94,10 +94,10 @@ workspace = true
 
 [dev-dependencies.snarkvm]
 workspace = true
-features = [ "synthesizer" ]
+features = [ "synthesizer", "test-helpers" ]
 
 [dev-dependencies.tempfile]
-version = "3"
+workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["serde"]

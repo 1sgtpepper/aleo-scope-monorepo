@@ -87,7 +87,7 @@ features = [ "sink" ]
 
 [dependencies.locktick]
 workspace = true
-features = [ "parking_lot" ]
+features = [ "parking_lot", "tokio" ]
 optional = true
 
 [dependencies.lru]
@@ -182,11 +182,18 @@ workspace = true
 workspace = true
 features = [ "test" ]
 
+[dev-dependencies.snarkvm]
+workspace = true
+features = [ "test-helpers" ]
+
 [dev-dependencies.tracing-subscriber]
 workspace = true
 features = [ "env-filter", "fmt" ]
 
 [dev-dependencies.rand_chacha]
+workspace = true
+
+[dev-dependencies.tempfile]
 workspace = true
 
 [package.metadata.cargo-machete]
