@@ -7,8 +7,10 @@ Jobs run in one of two places:
 
 - **GitHub-hosted runners** for cheap jobs: formatting, `cargo deny`,
   shellcheck, the source checks, `cargo machete`, the Windows checks and the lighter crates'
-  tests. These restore `~/.cargo` and `target/` with `Swatinem/rust-cache`,
-  saved only from `staging`.
+  tests. The hosted test jobs restore `~/.cargo` and `target/` with
+  `Swatinem/rust-cache`, saved only from `staging`. The Windows checks build
+  cold. Their caches would take about half of the repository's 10 GB cache
+  limit and evict the test jobs' entries.
 - **The self-hosted `cpu` fleet** for heavy jobs: clippy, the heavier
   crates' tests, the `snarkos` build and the devnets. `start-cpu-runners`
   starts the boxes the run needs; they stop themselves when idle. Each box
@@ -39,8 +41,8 @@ a job marked "release" only on the third. The other jobs run on every event.
 | `test (light)` | hosted | all | 90 | `snarkos-account`, `-utilities`, `-node-tcp`, `-node-sync-locators`, `-node-network` |
 | `test (cdn)` | hosted | all | 90 | `snarkos-node-cdn` |
 | `test (messages)` | hosted | all | 90 | `snarkos-node-bft-events`, `-node-router-messages`, `-node-bft-ledger-service` |
-| `test (services)` | `cpu` | all | 90 | `snarkos-node-consensus`, `-node-rest`, `-cli` |
-| `test (node)` | `cpu` | all | 90 | `snarkos-node` with `snarkos-node-bft-storage-service` (features `memory,persistent`) |
+| `test (services)` | `cpu` | all | 90 | `snarkos-node-consensus`, `-cli`; then `-node-rest` |
+| `test (node)` | `cpu` | all | 90 | `snarkos-node`, `-node-bft-storage-service` |
 | `test (bft)` | `cpu` | all | 90 | `snarkos-node-bft` with `metrics` |
 | `test (router-sync)` | `cpu` | all | 90 | `snarkos-node-router`; then `-node-sync` |
 | `build-snarkos` | `cpu` | all | 60 | release `snarkos` with `test_network`, as an artifact |
@@ -72,9 +74,10 @@ such a pull request cannot merge until a workflow reports that check for it.
 Each line of a `test` entry is one cargo build. `cargo test -p a -p b` unifies
 the features of `a` and `b`, and several crates enable features on their
 dependencies that change what those dependencies do, such as
-`snarkos-node-router/test` and `snarkvm-ledger-block/test`. So crates share a
-line only where that unification enables no such feature on any crate. Helper
-features such as `test-helpers` and `mock` can still be unified, so a test may
+`snarkos-node-router/test-helpers` and `snarkvm-ledger-block/test`. So crates
+share a line only where that unification enables no such feature on any crate.
+Other helper features, such as `mock` and the other crates' `test-helpers`, can
+still be unified, so a test may
 compile in its line that would not under `cargo test -p <crate>` alone. Check
 this before moving a crate between lines, for example by comparing
 `cargo tree -e features` for the line against each crate alone.
@@ -84,9 +87,13 @@ default, so the tests in `helpers::telemetry` compile. The `each-feature` job
 checks the crate without `metrics`. The `simple_node` line passes
 `--no-tests=fail`, because the step otherwise lets a command match no tests.
 
-[`.config/nextest.toml`](.config/nextest.toml) sets two test threads. Each
-entry uploads nextest's JUnit reports as the artifact `junit-<entry>`, one file
-per line, with the time of each test.
+[`.config/nextest.toml`](.config/nextest.toml) sets two test threads, which
+the hosted entries use. The fleet entries run 16 tests at a time through
+`NEXTEST_TEST_THREADS`: most of their slow tests wait on timers rather than
+the CPU, and a box runs one job. `gateway::prop_tests::gateway_start` runs
+alone, because it asserts a fixed port that other tests may take. Each entry
+uploads nextest's JUnit reports as the artifact `junit-<entry>`, one file per
+line, with the time of each test.
 
 ## Devnets
 
