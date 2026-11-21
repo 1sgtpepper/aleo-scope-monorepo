@@ -29,22 +29,7 @@ cuda = [ "snarkvm-algorithms/cuda" ]
 rocks = [ "snarkvm-ledger-store/rocks" ]
 test = [ "snarkvm-console/test", "snarkvm-ledger-store/test", "snarkvm-synthesizer-process/test" ]
 test-old-consensus-versions = [ "test" ]
-wasm = [
-  "snarkvm-console/wasm",
-  "snarkvm-ledger-block/wasm",
-  "snarkvm-ledger-committee/wasm",
-  "snarkvm-ledger-query/wasm",
-  "snarkvm-ledger-store/wasm",
-  "snarkvm-synthesizer-process/wasm",
-  "snarkvm-synthesizer-program/wasm",
-  "snarkvm-synthesizer-snark/wasm"
-]
-dev-print = [
-  "snarkvm-algorithms/dev-print",
-  "snarkvm-console/dev-print",
-  "snarkvm-synthesizer-snark/dev-print",
-  "snarkvm-utilities/dev-print"
-]
+wasm = [ "snarkvm-console/wasm", "snarkvm-synthesizer-process/wasm" ]
 dev_skip_checks = [ "snarkvm-synthesizer-process/dev_skip_checks" ]
 test_consensus_heights = [ "snarkvm-synthesizer-process/test_consensus_heights" ]
 

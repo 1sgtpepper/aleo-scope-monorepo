@@ -129,34 +129,22 @@ package = [
 async = [ "snarkvm-ledger/async", "snarkvm-synthesizer/async" ]
 cuda = [ "snarkvm-algorithms/cuda" ]
 no-embedded-srs = [ "snarkvm-parameters/no-embedded-srs" ]
-# Has no effect, but snarkOS enables it. Locktick is enabled with `--cfg locktick`; see
-# `.cargo/config.toml`.
-locktick = [ ]
 rocks = [ "snarkvm-ledger/rocks", "snarkvm-synthesizer/rocks" ]
 test = [ "snarkvm-ledger/test" ]
+# Helpers for tests. They are not part of the API, and semver does not cover them.
 test-helpers = [ "snarkvm-algorithms?/test-helpers", "snarkvm-ledger/test-helpers" ]
-algorithms = [ "snarkvm-algorithms" ]
-circuit = [ "snarkvm-circuit" ]
-console = [ "snarkvm-console" ]
-curves = [ "snarkvm-curves" ]
-fields = [ "snarkvm-fields" ]
-ledger = [ "snarkvm-ledger" ]
-metrics = [ "snarkvm-metrics", "snarkvm-ledger/metrics" ]
-parameters = [ "snarkvm-parameters" ]
-synthesizer = [ "snarkvm-synthesizer" ]
-utilities = [ "snarkvm-utilities" ]
-wasm = [ "snarkvm-wasm" ]
+algorithms = [ "dep:snarkvm-algorithms" ]
+circuit = [ "dep:snarkvm-circuit" ]
+console = [ "dep:snarkvm-console" ]
+curves = [ "dep:snarkvm-curves" ]
+fields = [ "dep:snarkvm-fields" ]
+ledger = [ "dep:snarkvm-ledger" ]
+metrics = [ "dep:snarkvm-metrics", "snarkvm-ledger/metrics" ]
+parameters = [ "dep:snarkvm-parameters" ]
+synthesizer = [ "dep:snarkvm-synthesizer" ]
+utilities = [ "dep:snarkvm-utilities" ]
+wasm = [ "dep:snarkvm-wasm" ]
 
-dev-print = [ 
-  "snarkvm-utilities/dev-print",
-  "snarkvm-algorithms/dev-print",
-  "snarkvm-circuit/dev-print",
-  "snarkvm-console/dev-print",
-  "snarkvm-curves/dev-print",
-  "snarkvm-fields/dev-print",
-  "snarkvm-parameters/dev-print",
-  "snarkvm-synthesizer/dev-print",
-]
 dev_skip_checks = [
   "snarkvm-console/dev_skip_checks",
   "snarkvm-synthesizer/dev_skip_checks"

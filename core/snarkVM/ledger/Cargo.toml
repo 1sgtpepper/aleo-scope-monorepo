@@ -98,10 +98,11 @@ test = [
   "snarkvm-ledger-store/test",
   "snarkvm-synthesizer/test"
 ]
+# Helpers for tests. They are not part of the API, and semver does not cover them.
 # Keep the [dev-dependencies] in sync with this list: the unit tests build `test_helpers` through
 # `cfg(test)`, without this feature.
 test-helpers = [
-  "snarkvm-ledger-test-helpers",
+  "dep:snarkvm-ledger-test-helpers",
   "snarkvm-ledger-committee/test-helpers",
   "snarkvm-ledger-narwhal/test-helpers",
   "dep:snarkvm-circuit",
@@ -112,7 +113,6 @@ test_targets = [
 ]
 dev-committee = []
 dev_genesis_state_root = [ "snarkvm-ledger-store/dev_genesis_state_root" ]
-dev-print = [ "snarkvm-utilities/dev-print" ]
 
 [dependencies.snarkvm-console]
 workspace = true
