@@ -128,7 +128,6 @@ package = [
 
 async = [ "snarkvm-ledger/async", "snarkvm-synthesizer/async" ]
 cuda = [ "snarkvm-algorithms/cuda" ]
-parameters_no_std_out = [ "snarkvm-parameters/no_std_out" ]
 no-embedded-srs = [ "snarkvm-parameters/no-embedded-srs" ]
 # Has no effect, but snarkOS enables it. Locktick is enabled with `--cfg locktick`; see
 # `.cargo/config.toml`.
@@ -147,7 +146,6 @@ parameters = [ "snarkvm-parameters" ]
 synthesizer = [ "snarkvm-synthesizer" ]
 utilities = [ "snarkvm-utilities" ]
 wasm = [ "snarkvm-wasm" ]
-snark-print = [ "snarkvm-algorithms?/snark-print" ]
 
 dev-print = [ 
   "snarkvm-utilities/dev-print",
@@ -607,9 +605,6 @@ version = "0.11.2"
 
 [dev-dependencies.tempfile]
 workspace = true
-
-[dev-dependencies.walkdir]
-version = "2"
 
 [profile.release]
 lto = "thin"

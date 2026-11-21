@@ -18,18 +18,9 @@ edition = "2024"
 
 [features]
 default = [ ]
-locktick = [
-  "dep:locktick",
-  "snarkvm/locktick",
-  "snarkos-utilities/locktick"
-]
 metrics = [ "dep:snarkos-node-metrics", "snarkvm/metrics" ]
 mock = [ ]
 cuda = [ "snarkvm/cuda" ]
-serial = [
-  "snarkvm/serial",
-  "snarkos-node-metrics?/serial"
-]
 test-helpers = [ "mock" ]
 test_network = [
   "snarkvm/dev-committee",
@@ -47,19 +38,11 @@ version = "0.1"
 workspace = true
 features = [ "serde", "rayon" ]
 
-[dependencies.locktick]
-workspace = true
-features = [ "parking_lot" ]
-optional = true
-
 [dependencies.snarkos-node-metrics]
 workspace = true
 optional = true
 
 [dependencies.snarkos-utilities]
-workspace = true
-
-[dependencies.parking_lot]
 workspace = true
 
 [dependencies.rand]
