@@ -277,6 +277,8 @@ jobs:
   # `large_params`, on any snarkvm crate. Helper features such as
   # `test-helpers` can still be unified. Each command in an entry with a
   # different feature set rebuilds the snarkvm crates whose features change.
+  # Commands with the same `-p` set and cargo flags share one build; nextest's
+  # `-E`, `-j` and `--run-ignored` are not cargo flags.
   #
   # Cheap entries run on free hosted runners, the rest on the fleet.
   test:
@@ -291,36 +293,52 @@ jobs:
           # The first run's powers tests, with `filesystem`, cache the powers
           # files in ~/.aleo/resources. The ignored tests run without
           # `filesystem`, and read those files. The last two runs share a build.
+          # In the first run, `--lib --tests` leaves out the examples. `lint`
+          # checks that they compile.
           - name: crates
             runs: |
-              nextest run -p snarkvm -p snarkvm-algorithms -p snarkvm-circuit-collections -p snarkvm-circuit-types-integers -p snarkvm-console-collections -p snarkvm-parameters --features snarkvm-parameters/filesystem -E !package(snarkvm-parameters)|test(/powers::tests/)
+              nextest run -p snarkvm -p snarkvm-algorithms -p snarkvm-circuit-collections -p snarkvm-circuit-types-integers -p snarkvm-console-collections -p snarkvm-parameters --features snarkvm-parameters/filesystem --lib --tests -E !package(snarkvm-parameters)|test(/powers::tests/)
               nextest run -p snarkvm-parameters -p snarkvm-algorithms --run-ignored all -E package(snarkvm-parameters)
               nextest run -p snarkvm-parameters -p snarkvm-algorithms --run-ignored ignored-only -E package(snarkvm-algorithms)
           - name: ledger
             runs: nextest run -p snarkvm-ledger
           # ledger-query's async tests bound wall-clock time, which a loaded
-          # hosted runner can exceed.
+          # hosted runner, or other tests beside them, can exceed. The last
+          # three lines name the same packages and features, so they share one
+          # build, and their filters split its tests. A package named in `-p`
+          # but in no filter is built and never tested. The build turns on
+          # ledger-query's `async` for the other packages, and `filesystem` for
+          # ledger-query. A plain `--features async` would also turn on
+          # narwhal-data's own `async`.
           - name: ledger-store
             runs: |
               nextest run -p snarkvm-ledger-store --features rocks
-              nextest run -p snarkvm-ledger-narwhal-data -p snarkvm-ledger-test-helpers
-              nextest run -p snarkvm-ledger-puzzle -p snarkvm-ledger-puzzle-epoch
-              nextest run -p snarkvm-ledger-query --features async
+              nextest run -p snarkvm-ledger-narwhal-data -p snarkvm-ledger-test-helpers -p snarkvm-ledger-puzzle -p snarkvm-ledger-puzzle-epoch -p snarkvm-ledger-query --features snarkvm-ledger-query/async -E package(=snarkvm-ledger-narwhal-data)|package(=snarkvm-ledger-test-helpers)
+              nextest run -p snarkvm-ledger-narwhal-data -p snarkvm-ledger-test-helpers -p snarkvm-ledger-puzzle -p snarkvm-ledger-puzzle-epoch -p snarkvm-ledger-query --features snarkvm-ledger-query/async -E package(=snarkvm-ledger-puzzle)|package(=snarkvm-ledger-puzzle-epoch)
+              nextest run -p snarkvm-ledger-narwhal-data -p snarkvm-ledger-test-helpers -p snarkvm-ledger-puzzle -p snarkvm-ledger-puzzle-epoch -p snarkvm-ledger-query --features snarkvm-ledger-query/async -E package(=snarkvm-ledger-query)
           - name: synthesizer
             runs: nextest run -p snarkvm-synthesizer --lib --bins -j 16
+          # The three lines share one build, and their filters split its tests.
+          # The build turns on `filesystem` for synthesizer-program and
+          # circuit-program. `test-merge (synthesizer-program)` runs the
+          # synthesizer-program integration tests. `--lib --bins` also applies
+          # to synthesizer-process, so an integration test added to it would
+          # not run here.
           - name: synthesizer-process
             runs: |
-              nextest run -p snarkvm-synthesizer-process
-              nextest run -p snarkvm-synthesizer-program --lib --bins
-              nextest run -p snarkvm-circuit-program
+              nextest run -p snarkvm-synthesizer-process -p snarkvm-synthesizer-program -p snarkvm-circuit-program --lib --bins -E package(=snarkvm-synthesizer-process)
+              nextest run -p snarkvm-synthesizer-process -p snarkvm-synthesizer-program -p snarkvm-circuit-program --lib --bins -E package(=snarkvm-synthesizer-program)
+              nextest run -p snarkvm-synthesizer-process -p snarkvm-synthesizer-program -p snarkvm-circuit-program --lib --bins -E package(=snarkvm-circuit-program)
           # nextest runs no doctests. The `compile_fail` doctests check that
           # outside crates cannot implement the sealed traits. This entry is one
-          # workspace build, so it unifies `rocks` and
-          # `dev-network`, which no doctest depends on. Leaving out snarkvm-wasm keeps `wasm` off. The doctests
-          # of the RocksDB maps need `rocks`; the flag enables it even if no
-          # dev-dependency does.
+          # workspace build, so it unifies `dev-network`, which no doctest
+          # depends on. Leaving out snarkvm-wasm keeps `wasm` off. Leaving out
+          # snarkvm-testchain-generator, which has no doctests, keeps
+          # `test-helpers` and `rocks` off snarkvm-ledger, and `rocks` off
+          # snarkvm-synthesizer. The doctests of the RocksDB maps need `rocks`,
+          # which only the flag enables.
           - name: doctests
-            runs: test --workspace --exclude snarkvm-wasm --doc --features snarkvm-ledger-store/rocks
+            runs: test --workspace --exclude snarkvm-wasm --exclude snarkvm-testchain-generator --doc --features snarkvm-ledger-store/rocks
     name: test (${{ matrix.name }})
     steps: &test-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -470,22 +488,25 @@ jobs:
         include:
           - name: ledger-rocks
             runs: nextest run -p snarkvm-ledger --release --features rocks -j 10
-          # Only this entry runs valid_solutions and the genesis tests that need
-          # `dev_genesis_state_root`, so pull requests to staging do not.
-          # `dev-network` compiles valid_solutions and lowers the proof targets so it
-          # can find valid solutions. `dev_genesis_state_root` fixes the stored
-          # genesis state root.
+          # Only this entry runs valid_solutions and the genesis state root tests,
+          # so pull requests to staging do not. `dev-network` compiles
+          # valid_solutions, lowers the proof targets so it can find valid
+          # solutions, and fixes the stored genesis state root. The store's
+          # `dev_genesis_state_root` is the part of `dev-network` that fixes it.
+          # The second and last lines share one build, and their filters split
+          # its tests.
           - name: ledger-merge
             runs: |
-              nextest run -p snarkvm-ledger --features dev-network --run-ignored all -E test(/^tests::valid_solutions::/)
-              nextest run -p snarkvm-ledger-store --run-ignored ignored-only -j 2
+              nextest run -p snarkvm-ledger --features dev-network --run-ignored all -E test(/^tests::valid_solutions::/)|test(test_load_dev_genesis_state_root)
+              nextest run -p snarkvm-ledger-store -p snarkvm-ledger-block --run-ignored ignored-only -j 2 -E package(=snarkvm-ledger-store)
               nextest run -p snarkvm-ledger-store --lib --features dev_genesis_state_root -E test(test_genesis_commitment_checks_passed_block_tree_root)|test(test_dev_genesis_state_root)
-              nextest run -p snarkvm-ledger --features dev_genesis_state_root -E test(test_load_dev_genesis_state_root)
-              nextest run -p snarkvm-ledger-block -j 12
+              nextest run -p snarkvm-ledger-store -p snarkvm-ledger-block -j 12 -E package(=snarkvm-ledger-block)
+          # `--lib --tests` leaves out the examples. `lint` checks that they
+          # compile.
           - name: parameters
-            runs: nextest run -p snarkvm-parameters --features filesystem -j 2
+            runs: nextest run -p snarkvm-parameters --features filesystem --lib --tests -j 2
           - name: parameters-uncached
-            runs: nextest run -p snarkvm-parameters --features filesystem --run-ignored ignored-only -j 2
+            runs: nextest run -p snarkvm-parameters --features filesystem --lib --tests --run-ignored ignored-only -j 2
           # The `snarkvm-synthesizer` lines select tiers by `#[ignore]` and the
           # `memory_intensive` and `old_versions` path markers; see CI.md.
           # Two shards: the tests keep all 8 slots busy for the whole run, so only

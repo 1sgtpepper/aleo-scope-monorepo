@@ -5568,12 +5568,10 @@ name = "snarkos-node-metrics"
 version = "4.13.1"
 dependencies = [
  "built",
- "metrics",
  "metrics-exporter-prometheus",
  "rayon",
  "snarkos-utilities",
  "snarkvm",
- "time",
  "tokio",
  "tracing",
 ]
