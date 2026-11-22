@@ -29,6 +29,7 @@ cuda = [ "snarkvm-algorithms/cuda" ]
 rocks = [ "snarkvm-ledger-store/rocks" ]
 test = [ "snarkvm-console/test", "snarkvm-ledger-store/test", "snarkvm-synthesizer-process/test" ]
 test-old-consensus-versions = [ "test" ]
+test-helpers = [ ]
 wasm = [ "snarkvm-console/wasm", "snarkvm-synthesizer-process/wasm" ]
 dev_skip_checks = [ "snarkvm-synthesizer-process/dev_skip_checks" ]
 test_consensus_heights = [ "snarkvm-synthesizer-process/test_consensus_heights" ]
@@ -152,7 +153,7 @@ workspace = true
 
 [dev-dependencies.snarkvm-console]
 workspace = true
-features = [ "filesystem", "test-helpers" ]
+features = [ "filesystem", "test-helpers", "test_consensus_heights" ]
 
 [dev-dependencies.snarkvm-ledger-committee]
 workspace = true
