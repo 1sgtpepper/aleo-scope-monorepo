@@ -70,6 +70,14 @@ impl<N: Network> Process<N> {
             // Note: `Stack::new` cannot be used here because it would increment the edition.
             // Amendments must preserve the existing edition. Validity is verified by `initialize_and_check`.
             let existing_stack = self.get_stack(program_id)?;
+            if consensus_version >= ConsensusVersion::V23 {
+                // Note: The checksums are compared, because `ProgramCore::eq` does not compare constructor bodies.
+                ensure!(
+                    *existing_stack.program_checksum() == deployment.program().to_checksum()
+                        && *existing_stack.program_edition() == deployment.edition(),
+                    "An amendment must preserve the program and edition of '{program_id}'"
+                );
+            }
             let stack = Stack::new_raw(self, deployment.program(), *existing_stack.program_edition())?;
             stack.initialize_and_check(self)?;
             stack
@@ -78,9 +86,12 @@ impl<N: Network> Process<N> {
         };
         timing_event!("Compute the stack");
 
-        // Ensure the program does not make a static call to a function with a constant output.
         if consensus_version >= ConsensusVersion::V23 {
             ensure_no_static_calls_to_constant_outputs(&stack)?;
+            // Amendments preserve all code. On upgrades, `Stack::new` checks that the constructor is unchanged.
+            if !is_amendment {
+                stack.check_ecdsa_operand_types(stack.program_edition().is_zero())?;
+            }
         }
 
         // Ensure the verifying keys are well-formed and the certificates are valid.
@@ -132,6 +143,126 @@ mod tests {
 
     type CurrentAleo = circuit::network::AleoV0;
     type CurrentNetwork = console::network::MainnetV0;
+
+    #[test]
+    fn test_deployment_checks_intermediate_plaintext_size_from_v23() -> Result<()> {
+        let rng = &mut TestRng::default();
+        let process = Process::<CurrentNetwork>::load()?;
+        // Only the second cast exceeds the plaintext size limit. The function input and output both use u8.
+        let program = Program::from_str(&format!(
+            "program check_intermediate.aleo;
+             function run:
+                 input r0 as u8.private;
+                 cast {} into r1 as [field; 64u32];
+                 cast {} into r2 as [[field; 64u32]; 65u32];
+                 add r0 1u8 into r3;
+                 output r3 as u8.private;",
+            "0field ".repeat(64),
+            "r1 ".repeat(65),
+        ))?;
+        let mut deployment = process.deploy::<CurrentAleo, _>(&program, rng)?;
+        let verify = |deployment: &Deployment<CurrentNetwork>, rng: &mut TestRng| -> Result<()> {
+            process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V22, deployment, rng)?;
+            let error = process
+                .verify_deployment::<CurrentAleo, _>(ConsensusVersion::V23, deployment, rng)
+                .expect_err("V23 must reject the oversized destination.");
+            assert!(error.to_string().contains("exceeds the maximum allowed size in bits"), "{error}");
+            Ok(())
+        };
+        verify(&deployment, rng)?;
+
+        // A key-only amendment verifies the same function again.
+        process.load_deployment(&deployment)?;
+        deployment.set_program_owner_raw(None);
+        verify(&deployment, rng)
+    }
+
+    #[test]
+    fn test_deployment_register_size_limit() -> Result<()> {
+        let process = Process::<CurrentNetwork>::load()?;
+        for (body, size) in [
+            (
+                "function run:
+                 input r0 as u8.public;
+                 call.dynamic 'callee' 'aleo' 'sample' with r0 (as u8.public) into r1 (as [u8; 3u32].public);
+                 output r0 as u8.public;",
+                24,
+            ),
+            (
+                "function run:
+                 input r0 as dynamic.record;
+                 get.record.dynamic r0.amount into r1 as u16;
+                 output 0u8 as u8.public;",
+                16,
+            ),
+            (
+                "closure local:
+                 input r0 as u8;
+                 add 1u32 2u32 into r1;
+                 output r0 as u8;
+             function run:
+                 input r0 as u8.public;
+                 call local r0 into r1;
+                 output r1 as u8.public;",
+                32,
+            ),
+        ] {
+            let program = Program::from_str(&format!("program check_types.aleo; {body}"))?;
+            let stack = Stack::new(&process, &program)?;
+            stack.check_deployment_register_sizes(size)?;
+            let error =
+                stack.check_deployment_register_sizes(size - 1).expect_err("The destination exceeds the limit.");
+            assert!(error.to_string().contains("exceeds the maximum allowed size in bits"), "{error}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_deployment_register_size_imports() -> Result<()> {
+        let process = Process::<CurrentNetwork>::load()?;
+        process.lock().add_program(&Program::from_str(
+            "program shared_types.aleo;
+             struct item:
+                 amount as u32;
+             function run:
+                 input r0 as u32.public;
+                 output r0 as u32.public;",
+        )?)?;
+        process.lock().add_program(&Program::from_str(
+            "import shared_types.aleo;
+             program helper.aleo;
+             closure read:
+                 input r0 as dynamic.record;
+                 get.record.dynamic r0.amount into r1 as u64;
+                 output 0u8 as u8;
+             function make:
+                 input r0 as u32.public;
+                 cast r0 into r1 as shared_types.aleo/item;
+                 output r1 as shared_types.aleo/item.public;",
+        )?)?;
+        let build = |instruction| -> Result<_> {
+            let program = Program::from_str(&format!(
+                "import helper.aleo;
+                 program reader.aleo;
+                 closure unused:
+                     input r0 as u8;
+                     add 1u128 2u128 into r1;
+                     output r0 as u8;
+                 function run:
+                     input r0 as dynamic.record;
+                     {instruction}
+                     output 0u8 as u8.public;"
+            ))?;
+            Stack::new(&process, &program)
+        };
+        let stack = build("call helper.aleo/make 0u32 into r1;")?;
+        stack.check_deployment_register_sizes(32)?;
+        assert!(stack.check_deployment_register_sizes(31).is_err());
+        let stack = build("call helper.aleo/read r0 into r1;")?;
+        stack.check_deployment_register_sizes(64)?;
+        assert!(stack.check_deployment_register_sizes(63).is_err());
+        Ok(())
+    }
 
     /// Returns a program whose functions cast `x` to a group with `op`, as a non-constant value, for every sampled input.
     fn cast_program_with(name: &str, functions: &[&str], op: &str, x: &str) -> Program<CurrentNetwork> {
@@ -378,6 +509,125 @@ mod tests {
         process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V22, &deployment_with_128_mappings, rng)?;
 
         Ok(())
+    }
+
+    #[test]
+    fn test_fixed_digest_type_by_consensus_version() -> Result<()> {
+        let rng = &mut TestRng::default();
+        let process = Process::load()?;
+        for (opcode, key_length, signature_type, message_type, valid_at_v23) in [
+            ("ecdsa.verify.digest", 33, "[u8; 65u32]", "[u8; 32u32]", true),
+            ("ecdsa.verify.digest", 33, "[u8; 65u32]", "[[u8; 2u32]; 32u32]", false),
+            ("ecdsa.verify.digest.eth", 20, "[u8; 65u32]", "[u8; 32u32]", true),
+            ("ecdsa.verify.digest.eth", 20, "[u8; 65u32]", "[[u8; 2u32]; 32u32]", false),
+            ("ecdsa.verify.digest", 33, "[[u8; 1u32]; 65u32]", "[u8; 32u32]", false),
+            ("ecdsa.verify.keccak256.raw", 33, "[[u8; 1u32]; 65u32]", "u8", false),
+            ("ecdsa.verify.keccak256.raw", 33, "[u8; 65u32]", "[[u8; 2u32]; 32u32]", true),
+        ] {
+            let program = Program::<CurrentNetwork>::from_str(&format!(
+                "program check_digest.aleo;
+                     function identity:
+                         input r0 as field.private;
+                         output r0 as field.private;
+                     view check:
+                         input r0 as {signature_type}.public;
+                         input r1 as [u8; {key_length}u32].public;
+                         input r2 as {message_type}.public;
+                         {opcode} r0 r1 r2 into r3;
+                         output r3 as boolean.public;"
+            ))?;
+            let deployment = process.deploy::<CurrentAleo, _>(&program, rng)?;
+            process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V22, &deployment, rng)?;
+            let result = process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V23, &deployment, rng);
+            if valid_at_v23 {
+                result?;
+            } else {
+                let error = result.unwrap_err();
+                assert!(error.to_string().contains("one-dimensional"), "Unexpected error: {error}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_fixed_digest_upgrade_and_amendment() -> Result<()> {
+        let rng = &mut TestRng::default();
+        let process = Process::load()?;
+        let program_with_view = |body: &str| {
+            Program::<CurrentNetwork>::from_str(&format!(
+                r"
+program legacy_digest.aleo;
+
+struct arguments:
+    sig as [u8; 65u32];
+    eth as [u8; 20u32];
+    digest as [[u8; 2u32]; 32u32];
+
+mapping arguments_by_id:
+    key as u8.public;
+    value as arguments.public;
+
+function identity:
+    input r0 as field.private;
+    output r0 as field.private;
+
+constructor:
+    branch.eq true true to done;
+    get arguments_by_id[0u8] into r0;
+    ecdsa.verify.digest.eth r0.sig r0.eth r0.digest into r1;
+    position done;
+
+view check:
+    input r0 as arguments.public;
+    {body}"
+            ))
+        };
+        let program =
+            program_with_view("ecdsa.verify.digest.eth r0.sig r0.eth r0.digest into r1; output r1 as boolean.public;")?;
+        let repaired = program_with_view("output false as boolean.public;")?;
+        let first = process.deploy::<CurrentAleo, _>(&repaired, rng)?;
+        let error = process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V23, &first, rng).unwrap_err();
+        assert!(error.to_string().contains("one-dimensional"), "Unexpected error: {error}");
+        let original = process.deploy::<CurrentAleo, _>(&program, rng)?;
+        process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V22, &original, rng)?;
+        process.load_deployment(&original)?;
+
+        // A key-only amendment preserves both the edition and all program code.
+        let amendment = Deployment::new(
+            original.edition(),
+            program.clone(),
+            original.verifying_keys().clone(),
+            original.program_checksum(),
+            None,
+        )?;
+        process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V23, &amendment, rng)?;
+
+        // An amendment cannot change the constructor.
+        let source = program.to_string();
+        assert!(source.contains("branch.eq true true to done;"));
+        let reconstructed = Program::<CurrentNetwork>::from_str(
+            &source.replace("branch.eq true true to done;", "branch.eq false false to done;"),
+        )?;
+
+        for (edition, candidate) in
+            [(original.edition() + 1, &program), (original.edition(), &repaired), (original.edition(), &reconstructed)]
+        {
+            let changed = Deployment::new(
+                edition,
+                candidate.clone(),
+                original.verifying_keys().clone(),
+                Some(candidate.to_checksum()),
+                None,
+            )?;
+            assert!(process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V23, &changed, rng).is_err());
+        }
+
+        // An upgrade can repair the view while preserving the immutable constructor.
+        let upgrade = process.deploy::<CurrentAleo, _>(&program, rng)?;
+        let error = process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V23, &upgrade, rng).unwrap_err();
+        assert!(error.to_string().contains("one-dimensional"), "Unexpected error: {error}");
+        let upgrade = process.deploy::<CurrentAleo, _>(&repaired, rng)?;
+        process.verify_deployment::<CurrentAleo, _>(ConsensusVersion::V23, &upgrade, rng)
     }
 
     /// A program whose `constant_output` function returns its input as a `.constant` output, and whose
